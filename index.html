@@ -35,23 +35,16 @@
       linear-gradient(180deg, var(--bg1), var(--bg2));
   }
 
-  /* CONTENEDOR ESCALADO */
   .scale-wrap{
     transform: scale(0.8);
     transform-origin: top center;
   }
 
-  /* MARCO */
   .frame{
     margin:36px 20px;
     padding:3px;
     border-radius:32px;
-    background: linear-gradient(
-      135deg,
-      var(--violet),
-      var(--cyan),
-      var(--pink)
-    );
+    background: linear-gradient(135deg, var(--violet), var(--cyan), var(--pink));
     box-shadow:
       0 30px 80px rgba(0,0,0,.55),
       inset 0 0 0 1px rgba(255,255,255,.15);
@@ -71,7 +64,6 @@
   h1{
     text-align:center;
     font-weight:650;
-    font-size:42px;
     letter-spacing:.10em;
     margin:4px 0 6px;
     background: linear-gradient(90deg, var(--violet), var(--cyan), var(--pink));
@@ -89,10 +81,6 @@
   .author a{
     color:var(--muted);
     text-decoration:none;
-  }
-
-  .author a:hover{
-    color:#fff;
   }
 
   .panel{
@@ -127,7 +115,6 @@
     display:flex;
     flex-direction:column;
     justify-content:center;
-    box-shadow: 0 14px 28px rgba(0,0,0,.20);
   }
 
   label{
@@ -150,7 +137,7 @@
     font-size:15px;
   }
 
-  .interval select{
+  .center-select select{
     text-align:center;
     text-align-last:center;
   }
@@ -168,14 +155,13 @@
 </head>
 
 <body>
-
 <div class="scale-wrap">
   <div class="frame">
     <div class="app">
 
       <h1>DreamShadows</h1>
       <div class="author">
-        <a href="https://www.youtube.com/@rafgim" target="_blank" rel="noopener">
+        <a href="https://www.youtube.com/@rafgim" target="_blank">
           © By Rafael Gimeno
         </a>
       </div>
@@ -191,9 +177,9 @@
           <div class="card">
             <label>
               Delay
-              <span class="value"><span id="delayVal">120</span> ms</span>
+              <span class="value"><span id="delayVal">250</span> ms</span>
             </label>
-            <input id="delay" type="range" min="0" max="800" value="120">
+            <input id="delay" type="range" min="0" max="800" value="250">
           </div>
 
           <div class="card">
@@ -204,27 +190,17 @@
           <div class="card">
             <label>
               Volumen
-              <span class="value"><span id="volVal">70</span>%</span>
+              <span class="value"><span id="volVal">100</span>%</span>
             </label>
-            <input id="volume" type="range" min="0" max="100" value="70">
+            <input id="volume" type="range" min="0" max="100" value="100">
           </div>
 
-          <div class="card full interval">
-            <label>Intervalo</label>
-            <select id="interval">
-              <option value="0">Unísono</option>
-              <option value="1">2ª menor</option>
-              <option value="2">2ª mayor</option>
-              <option value="3">3ª menor</option>
-              <option value="4">3ª mayor</option>
-              <option value="5">4ª justa</option>
-              <option value="6">Tritono</option>
-              <option value="7">5ª justa</option>
-              <option value="8">6ª menor</option>
-              <option value="9">6ª mayor</option>
-              <option value="10">7ª menor</option>
-              <option value="11">7ª mayor</option>
-              <option value="12" selected>Octava</option>
+          <div class="card full center-select">
+            <label>Repeticiones</label>
+            <select id="repeats">
+              <option value="1" selected>1 repetición</option>
+              <option value="2">2 repeticiones</option>
+              <option value="3">3 repeticiones</option>
             </select>
           </div>
 
@@ -238,6 +214,7 @@
 <script>
 let midiAccess, midiIn, midiOut;
 const pending = new Map();
+let noteInstanceId = 0;
 
 const inSel = document.getElementById("midiIn");
 const outSel = document.getElementById("midiOut");
@@ -245,7 +222,7 @@ const delay = document.getElementById("delay");
 const delayVal = document.getElementById("delayVal");
 const volume = document.getElementById("volume");
 const volVal = document.getElementById("volVal");
-const intervalSel = document.getElementById("interval");
+const repeatsSel = document.getElementById("repeats");
 
 delay.oninput = () => delayVal.textContent = delay.value;
 volume.oninput = () => volVal.textContent = volume.value;
@@ -289,27 +266,46 @@ function attach(){
 function onMIDI(e){
   if(!midiOut) return;
 
-  const [st, note, vel] = e.data;
+  const st = e.data[0];
   const cmd = st & 0xf0;
-  const ch = st & 0x0f;
+  const ch  = st & 0x0f;
+  const note = e.data[1];
+  const vel  = e.data[2] ?? 0;
 
-  const semis = parseInt(intervalSel.value,10);
   const d = parseInt(delay.value,10);
+  const reps = parseInt(repeatsSel.value,10);
   const factor = volume.value / 100;
 
-  const outNote = clamp(note + semis);
   const key = ch + ":" + note;
 
   if(cmd === 0x90 && vel > 0){
+    const id = ++noteInstanceId;
+    const arr = pending.get(key) ?? [];
+    arr.push({ id, reps });
+    pending.set(key, arr);
+
     const outVel = clamp(Math.round(vel * factor));
-    pending.set(key, outNote);
-    setTimeout(()=> midiOut.send([0x90 | ch, outNote, outVel]), d);
+
+    for(let r=1; r<=reps; r++){
+      setTimeout(()=>{
+        midiOut.send([0x90 | ch, note, outVel]);
+      }, r * d);
+    }
   }
 
   if(cmd === 0x80 || (cmd === 0x90 && vel === 0)){
-    const used = pending.get(key) ?? outNote;
-    setTimeout(()=> midiOut.send([0x80 | ch, used, 0]), d);
-    pending.delete(key);
+    const arr = pending.get(key) ?? [];
+    const inst = arr.shift();
+    if(arr.length) pending.set(key, arr);
+    else pending.delete(key);
+
+    const repsOff = inst?.reps ?? reps;
+
+    for(let r=1; r<=repsOff; r++){
+      setTimeout(()=>{
+        midiOut.send([0x80 | ch, note, 0]);
+      }, r * d);
+    }
   }
 }
 </script>
