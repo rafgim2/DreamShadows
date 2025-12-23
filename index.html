@@ -161,7 +161,7 @@
 
       <h1>DreamShadows</h1>
       <div class="author">
-        <a href="https://www.youtube.com/@rafgim" target="_blank">
+        <a href="https://www.youtube.com/@rafgim" target="_blank" rel="noopener">
           © By Rafael Gimeno
         </a>
       </div>
@@ -227,15 +227,26 @@ const repeatsSel = document.getElementById("repeats");
 delay.oninput = () => delayVal.textContent = delay.value;
 volume.oninput = () => volVal.textContent = volume.value;
 
+// ✅ IMPORTANTE: al cambiar IN/OUT, re-enganchar sin tocar el otro selector
+inSel.addEventListener("change", () => attach());
+outSel.addEventListener("change", () => attach());
+
 function clamp(n){ return Math.max(0, Math.min(127, n)); }
 
 navigator.requestMIDIAccess().then(midi=>{
   midiAccess = midi;
   refresh();
   midi.onstatechange = refresh;
+}).catch(err=>{
+  console.error("WebMIDI no disponible:", err);
+  alert("WebMIDI no disponible. Prueba en Chrome/Edge con un dispositivo MIDI conectado.");
 });
 
 function refresh(){
+  // ✅ Guardar selección actual para no perderla al reconstruir listas
+  const prevIn  = inSel.value;
+  const prevOut = outSel.value;
+
   inSel.innerHTML = "";
   outSel.innerHTML = "";
 
@@ -253,13 +264,23 @@ function refresh(){
     outSel.appendChild(opt);
   });
 
+  // ✅ Restaurar selección si sigue existiendo
+  if (prevIn && midiAccess.inputs.has(prevIn)) inSel.value = prevIn;
+  if (prevOut && midiAccess.outputs.has(prevOut)) outSel.value = prevOut;
+
+  // ✅ Si no hay selección válida (p.ej. primer arranque), dejar la primera
+  if (!inSel.value && inSel.options.length) inSel.selectedIndex = 0;
+  if (!outSel.value && outSel.options.length) outSel.selectedIndex = 0;
+
   attach();
 }
 
 function attach(){
   if(midiIn) midiIn.onmidimessage = null;
-  midiIn = midiAccess.inputs.get(inSel.value);
-  midiOut = midiAccess.outputs.get(outSel.value);
+
+  midiIn = midiAccess.inputs.get(inSel.value) || null;
+  midiOut = midiAccess.outputs.get(outSel.value) || null;
+
   if(midiIn) midiIn.onmidimessage = onMIDI;
 }
 
@@ -278,6 +299,7 @@ function onMIDI(e){
 
   const key = ch + ":" + note;
 
+  // Note On real
   if(cmd === 0x90 && vel > 0){
     const id = ++noteInstanceId;
     const arr = pending.get(key) ?? [];
@@ -291,8 +313,10 @@ function onMIDI(e){
         midiOut.send([0x90 | ch, note, outVel]);
       }, r * d);
     }
+    return;
   }
 
+  // Note Off real
   if(cmd === 0x80 || (cmd === 0x90 && vel === 0)){
     const arr = pending.get(key) ?? [];
     const inst = arr.shift();
@@ -306,7 +330,10 @@ function onMIDI(e){
         midiOut.send([0x80 | ch, note, 0]);
       }, r * d);
     }
+    return;
   }
+
+  // Otros mensajes: ignorar
 }
 </script>
 </body>
